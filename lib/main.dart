@@ -363,7 +363,7 @@ class _HomePageState extends State<HomePage> {
                       elevation: 2,
                       child: ListTile(
                         leading: Icon(Icons.devices_other, color: Colors.blue),
-                        title: Text('ID: ${msg.id}'),
+                        title: Text('Table Number: ${msg.id}'),
                         subtitle: Text(
                           '${timeAgo(msg.receivedAt)}'
                           '${(msg.battery != null && msg.battery!.isNotEmpty) ? '  •  Battery: ${msg.battery}' : ''}',
