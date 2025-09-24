@@ -16,15 +16,16 @@ void main() {
   );
 }
 
+// Updated Message class to use id instead of strictly macAddress
 class Message {
-  final String macAddress;
+  final String id;
   final String? battery;
   final DateTime receivedAt;
-  Message({required this.macAddress, this.battery, required this.receivedAt});
+  Message({required this.id, this.battery, required this.receivedAt});
 }
 
-int _findMessageIndex(List<Message> messages, String macAddress) {
-  return messages.indexWhere((msg) => msg.macAddress == macAddress);
+int _findMessageIndex(List<Message> messages, String id) {
+  return messages.indexWhere((msg) => msg.id == id);
 }
 
 class TcpClientPage extends StatefulWidget {
@@ -147,38 +148,41 @@ class _TcpClientPageState extends State<TcpClientPage>
             try {
               final jsonMsg = json.decode(response);
 
-              final String? mac =
-                  (jsonMsg['mac_address'] ?? jsonMsg['mac'])?.toString();
+              // Use mac_address/mac or fallback to table_id
+              final String? id = (jsonMsg['mac_address'] ??
+                      jsonMsg['mac'] ??
+                      jsonMsg['table_id'])
+                  ?.toString();
               final dynamic cs = jsonMsg['call_status'];
               final String? battery = jsonMsg['battery']?.toString();
 
-              if (mac != null && cs != null) {
+              if (id != null && cs != null) {
                 final int? callStatus =
                     cs is int ? cs : int.tryParse(cs.toString());
                 if (callStatus == null) continue;
 
                 setState(() {
-                  final idx = _findMessageIndex(messages, mac);
+                  final idx = _findMessageIndex(messages, id);
                   if (callStatus == 1) {
                     if (idx == -1) {
                       messages.insert(
                         0,
                         Message(
-                          macAddress: mac,
+                          id: id,
                           battery: battery,
                           receivedAt: DateTime.now(),
                         ),
                       );
                     } else {
                       messages[idx] = Message(
-                        macAddress: mac,
+                        id: id,
                         battery: battery ?? messages[idx].battery,
                         receivedAt: DateTime.now(),
                       );
                     }
                     _showNotification(
                       'Device Call',
-                      'MAC: $mac${battery != null ? ' | Battery: $battery' : ''}',
+                      'ID: $id${battery != null ? ' | Battery: $battery' : ''}',
                     );
                   } else if (callStatus == 0 && idx != -1) {
                     messages.removeAt(idx);
@@ -186,7 +190,7 @@ class _TcpClientPageState extends State<TcpClientPage>
                 });
               } else {
                 _showNotification(
-                    'Device Message', 'Missing mac_address or call_status');
+                    'Device Message', 'Missing id or call_status');
               }
             } catch (e) {
               print('❌ JSON parse error: $e');
@@ -359,7 +363,7 @@ class _HomePageState extends State<HomePage> {
                       elevation: 2,
                       child: ListTile(
                         leading: Icon(Icons.devices_other, color: Colors.blue),
-                        title: Text('MAC: ${msg.macAddress}'),
+                        title: Text('ID: ${msg.id}'),
                         subtitle: Text(
                           '${timeAgo(msg.receivedAt)}'
                           '${(msg.battery != null && msg.battery!.isNotEmpty) ? '  •  Battery: ${msg.battery}' : ''}',
