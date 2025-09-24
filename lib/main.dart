@@ -34,7 +34,8 @@ class TcpClientPage extends StatefulWidget {
   _TcpClientPageState createState() => _TcpClientPageState();
 }
 
-class _TcpClientPageState extends State<TcpClientPage> {
+class _TcpClientPageState extends State<TcpClientPage>
+    with SingleTickerProviderStateMixin {
   final ipController = TextEditingController();
   final portController = TextEditingController();
 
@@ -46,6 +47,7 @@ class _TcpClientPageState extends State<TcpClientPage> {
       FlutterLocalNotificationsPlugin();
 
   final List<Message> messages = [];
+  late TabController _tabController;
 
   @override
   void initState() {
@@ -53,6 +55,7 @@ class _TcpClientPageState extends State<TcpClientPage> {
     _initNotifications();
     _requestNotificationPermission();
     _loadLastUsedConfig();
+    _tabController = TabController(length: 2, vsync: this);
   }
 
   Future<void> _loadLastUsedConfig() async {
@@ -87,22 +90,20 @@ class _TcpClientPageState extends State<TcpClientPage> {
     try {
       const AndroidNotificationDetails androidPlatformChannelSpecifics =
           AndroidNotificationDetails(
-            'server_channel',
-            'Server Messages',
-            channelDescription: 'Channel for server messages',
-            importance: Importance.max,
-            priority: Priority.high,
-            ticker: 'ticker',
-          );
-      const NotificationDetails platformChannelSpecifics = NotificationDetails(
-        android: androidPlatformChannelSpecifics,
+        'server_channel',
+        'Server Messages',
+        channelDescription: 'Channel for server messages',
+        importance: Importance.max,
+        priority: Priority.high,
+        ticker: 'ticker',
       );
+      const NotificationDetails platformChannelSpecifics =
+          NotificationDetails(android: androidPlatformChannelSpecifics);
       await flutterLocalNotificationsPlugin.show(
         0,
         title,
         body,
         platformChannelSpecifics,
-        payload: 'server_payload',
       );
       print('🔔 Notification shown: $title - $body');
     } catch (e) {
@@ -114,16 +115,21 @@ class _TcpClientPageState extends State<TcpClientPage> {
     final ip = ipController.text.trim();
     final port = int.tryParse(portController.text.trim()) ?? 0;
 
+    if (ip.isEmpty || port == 0) {
+      print("🚫 Please enter a valid IP and Port");
+      return;
+    }
+
     await _saveLastUsedConfig(ip, portController.text.trim());
 
     try {
-      socket = await Socket.connect(ip, port);
+      socket = await Socket.connect(ip, port, timeout: Duration(seconds: 5));
       setState(() => isConnected = true);
       print('✅ Connected to $ip:$port');
 
-      // Switch to Home tab after successful connection
+      // Switch to Home tab
       Future.delayed(Duration.zero, () {
-        DefaultTabController.of(context).animateTo(1);
+        if (mounted) _tabController.animateTo(1);
       });
 
       socket!.listen(
@@ -132,21 +138,25 @@ class _TcpClientPageState extends State<TcpClientPage> {
           final combined = _incomplete + chunk;
           final parts = combined.split('\n');
           _incomplete = parts.removeLast();
+
           for (final line in parts) {
             final response = line.trim();
             if (response.isEmpty) continue;
             print("📩 Server Line: '$response'");
+
             try {
               final jsonMsg = json.decode(response);
-              final String? mac = (jsonMsg['mac_address'] ?? jsonMsg['mac'])
-                  ?.toString();
+
+              final String? mac =
+                  (jsonMsg['mac_address'] ?? jsonMsg['mac'])?.toString();
               final dynamic cs = jsonMsg['call_status'];
               final String? battery = jsonMsg['battery']?.toString();
+
               if (mac != null && cs != null) {
-                final int? callStatus = cs is int
-                    ? cs
-                    : int.tryParse(cs.toString());
+                final int? callStatus =
+                    cs is int ? cs : int.tryParse(cs.toString());
                 if (callStatus == null) continue;
+
                 setState(() {
                   final idx = _findMessageIndex(messages, mac);
                   if (callStatus == 1) {
@@ -170,17 +180,13 @@ class _TcpClientPageState extends State<TcpClientPage> {
                       'Device Call',
                       'MAC: $mac${battery != null ? ' | Battery: $battery' : ''}',
                     );
-                  } else if (callStatus == 0) {
-                    if (idx != -1) {
-                      messages.removeAt(idx);
-                    }
+                  } else if (callStatus == 0 && idx != -1) {
+                    messages.removeAt(idx);
                   }
                 });
               } else {
                 _showNotification(
-                  'Device Message',
-                  'Missing mac_address or call_status',
-                );
+                    'Device Message', 'Missing mac_address or call_status');
               }
             } catch (e) {
               print('❌ JSON parse error: $e');
@@ -189,81 +195,102 @@ class _TcpClientPageState extends State<TcpClientPage> {
           }
         },
         onDone: () {
-          print("🔌 Disconnected");
+          print("🔌 Disconnected from server");
           setState(() => isConnected = false);
         },
         onError: (err) {
-          print("❌ Error: $err");
+          print("❌ Socket error: $err");
           setState(() => isConnected = false);
         },
       );
     } catch (e) {
       print("🚫 Could not connect: $e");
+      _showNotification("Connection Error", "Could not connect to $ip:$port");
     }
+  }
+
+  void disconnectFromServer() {
+    socket?.destroy();
+    setState(() => isConnected = false);
+    print("🔌 Disconnected manually");
+  }
+
+  void clearMessages() {
+    setState(() => messages.clear());
   }
 
   @override
   void dispose() {
-    socket?.close();
+    disconnectFromServer();
+    _tabController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      initialIndex: 0,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text("Hotel Bell App"),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Configurations', icon: Icon(Icons.settings)),
-              Tab(text: 'Home', icon: Icon(Icons.table_bar)),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          physics: NeverScrollableScrollPhysics(),
-          children: [
-            // Configurations Tab
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  TextField(
-                    controller: ipController,
-                    decoration: InputDecoration(labelText: "Server IP"),
-                  ),
-                  TextField(
-                    controller: portController,
-                    decoration: InputDecoration(labelText: "Port"),
-                    keyboardType: TextInputType.number,
-                  ),
-                  SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: connectToServer,
-                    child: Text("Connect"),
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.circle,
-                        color: isConnected ? Colors.green : Colors.grey,
-                        size: 16,
-                      ),
-                      SizedBox(width: 8),
-                      Text(isConnected ? "Connected" : "Not Connected"),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            // Home Tab
-            HomePage(messages: messages),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Hotel Bell App"),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Configurations', icon: Icon(Icons.settings)),
+            Tab(text: 'Home', icon: Icon(Icons.table_bar)),
           ],
         ),
+        actions: [
+          if (isConnected)
+            IconButton(
+              icon: Icon(Icons.power_settings_new),
+              onPressed: disconnectFromServer,
+              tooltip: "Disconnect",
+            ),
+        ],
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        physics: NeverScrollableScrollPhysics(),
+        children: [
+          // Configurations Tab
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                TextField(
+                  controller: ipController,
+                  decoration: InputDecoration(labelText: "Server IP"),
+                ),
+                TextField(
+                  controller: portController,
+                  decoration: InputDecoration(labelText: "Port"),
+                  keyboardType: TextInputType.number,
+                ),
+                SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: isConnected ? null : connectToServer,
+                  child: Text(isConnected ? "Connected" : "Connect"),
+                ),
+                SizedBox(height: 20),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.circle,
+                      color: isConnected ? Colors.green : Colors.grey,
+                      size: 16,
+                    ),
+                    SizedBox(width: 8),
+                    Text(isConnected ? "Connected" : "Not Connected"),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          // Home Tab
+          HomePage(
+            messages: messages,
+            onClear: clearMessages,
+          ),
+        ],
       ),
     );
   }
@@ -271,7 +298,8 @@ class _TcpClientPageState extends State<TcpClientPage> {
 
 class HomePage extends StatefulWidget {
   final List<Message> messages;
-  const HomePage({super.key, required this.messages});
+  final VoidCallback onClear;
+  const HomePage({super.key, required this.messages, required this.onClear});
 
   @override
   _HomePageState createState() => _HomePageState();
@@ -283,7 +311,6 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    // Update UI every 30 seconds for 'minutes ago' text
     _timer = Timer.periodic(Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
@@ -297,38 +324,52 @@ class _HomePageState extends State<HomePage> {
 
   String timeAgo(DateTime dateTime) {
     final diff = DateTime.now().difference(dateTime);
-    if (diff.inMinutes == 0) {
-      return 'Just now';
-    } else if (diff.inMinutes == 1) {
-      return '1 minute ago';
-    } else {
-      return '${diff.inMinutes} minutes ago';
-    }
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes == 1) return '1 minute ago';
+    if (diff.inHours < 1) return '${diff.inMinutes} minutes ago';
+    if (diff.inHours == 1) return '1 hour ago';
+    if (diff.inDays < 1) return '${diff.inHours} hours ago';
+    if (diff.inDays == 1) return '1 day ago';
+    return '${diff.inDays} days ago';
   }
 
   @override
   Widget build(BuildContext context) {
     final messages = widget.messages;
-    return Scaffold(
-      appBar: AppBar(title: Text('Device Calls')),
-      body: messages.isEmpty
-          ? Center(child: Text('No device calls yet.'))
-          : ListView.builder(
-              itemCount: messages.length,
-              itemBuilder: (context, index) {
-                final msg = messages[index];
-                return ListTile(
-                  leading: Icon(Icons.devices_other),
-                  title: Text('MAC: ${msg.macAddress}'),
-                  subtitle: Text(
-                    '${timeAgo(msg.receivedAt)}' +
-                        ((msg.battery != null && msg.battery!.isNotEmpty)
-                            ? '  •  Battery: ${msg.battery}'
-                            : ''),
-                  ),
-                );
-              },
-            ),
-    );
+    return messages.isEmpty
+        ? Center(child: Text('No device calls yet.'))
+        : Column(
+            children: [
+              Align(
+                alignment: Alignment.topRight,
+                child: TextButton.icon(
+                  onPressed: widget.onClear,
+                  icon: Icon(Icons.clear_all),
+                  label: Text("Clear All"),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    final msg = messages[index];
+                    return Card(
+                      margin:
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      elevation: 2,
+                      child: ListTile(
+                        leading: Icon(Icons.devices_other, color: Colors.blue),
+                        title: Text('MAC: ${msg.macAddress}'),
+                        subtitle: Text(
+                          '${timeAgo(msg.receivedAt)}'
+                          '${(msg.battery != null && msg.battery!.isNotEmpty) ? '  •  Battery: ${msg.battery}' : ''}',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
   }
 }
