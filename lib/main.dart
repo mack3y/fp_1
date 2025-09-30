@@ -16,12 +16,19 @@ void main() {
   );
 }
 
-// Updated Message class to use id instead of strictly macAddress
+// Updated Message class to include label
 class Message {
-  final String id;
+  final String id;       // unique identifier (table_id)
+  final String? label;   // human-readable label
   final String? battery;
   final DateTime receivedAt;
-  Message({required this.id, this.battery, required this.receivedAt});
+
+  Message({
+    required this.id,
+    this.label,
+    this.battery,
+    required this.receivedAt,
+  });
 }
 
 int _findMessageIndex(List<Message> messages, String id) {
@@ -148,11 +155,9 @@ class _TcpClientPageState extends State<TcpClientPage>
             try {
               final jsonMsg = json.decode(response);
 
-              // Use mac_address/mac or fallback to table_id
-              final String? id = (jsonMsg['mac_address'] ??
-                      jsonMsg['mac'] ??
-                      jsonMsg['table_id'])
-                  ?.toString();
+              // Extract table_id and label from the broadcast
+              final String? id = jsonMsg['table_id']?.toString();
+              final String? label = jsonMsg['label']?.toString();
               final dynamic cs = jsonMsg['call_status'];
               final String? battery = jsonMsg['battery']?.toString();
 
@@ -169,6 +174,7 @@ class _TcpClientPageState extends State<TcpClientPage>
                         0,
                         Message(
                           id: id,
+                          label: label,
                           battery: battery,
                           receivedAt: DateTime.now(),
                         ),
@@ -176,13 +182,14 @@ class _TcpClientPageState extends State<TcpClientPage>
                     } else {
                       messages[idx] = Message(
                         id: id,
+                        label: label ?? messages[idx].label,
                         battery: battery ?? messages[idx].battery,
                         receivedAt: DateTime.now(),
                       );
                     }
                     _showNotification(
                       'Device Call',
-                      'ID: $id${battery != null ? ' | Battery: $battery' : ''}',
+                      'Table: ${label ?? id}${battery != null ? ' | Battery: $battery' : ''}',
                     );
                   } else if (callStatus == 0 && idx != -1) {
                     messages.removeAt(idx);
@@ -190,7 +197,7 @@ class _TcpClientPageState extends State<TcpClientPage>
                 });
               } else {
                 _showNotification(
-                    'Device Message', 'Missing id or call_status');
+                    'Device Message', 'Missing table_id or call_status');
               }
             } catch (e) {
               print('❌ JSON parse error: $e');
@@ -363,7 +370,7 @@ class _HomePageState extends State<HomePage> {
                       elevation: 2,
                       child: ListTile(
                         leading: Icon(Icons.devices_other, color: Colors.blue),
-                        title: Text('Table Number: ${msg.id}'),
+                        title: Text('Table Number: ${msg.label ?? msg.id}'),
                         subtitle: Text(
                           '${timeAgo(msg.receivedAt)}'
                           '${(msg.battery != null && msg.battery!.isNotEmpty) ? '  •  Battery: ${msg.battery}' : ''}',
